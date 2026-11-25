@@ -1,0 +1,61 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--ink:#0a0e1a;--glass:rgba(255,255,255,.09);--edge:rgba(255,255,255,.18)}
+html{font-size:calc(100vw/80)}
+*{box-sizing:border-box;margin:0}
+body{background:var(--ink);color:#f4f6ff;font-family:system-ui,"Google Sans",Roboto,sans-serif;height:100vh;overflow:hidden}
+.bg i{position:fixed;border-radius:50%;filter:blur(6rem);will-change:transform}
+.bg i:nth-child(1){width:40rem;height:40rem;background:#4338ca;opacity:.55;left:-8rem;top:-10rem;animation:a 38s ease-in-out infinite alternate}
+.bg i:nth-child(2){width:34rem;height:34rem;background:#0891b2;opacity:.5;right:-6rem;bottom:-12rem;animation:b 46s ease-in-out infinite alternate}
+.bg i:nth-child(3){width:26rem;height:26rem;background:#a21caf;opacity:.35;right:22rem;top:-9rem;animation:a 52s ease-in-out infinite alternate-reverse}
+@keyframes a{to{transform:translate(18rem,10rem)}}
+@keyframes b{to{transform:translate(-16rem,-9rem)}}
+header{position:relative;display:flex;justify-content:space-between;align-items:flex-end;padding:3.5rem 5rem 1rem}
+#t{font-size:7rem;font-weight:200;letter-spacing:-.02em;line-height:1}
+#d{font-size:1.5rem;opacity:.7;margin-top:.6rem}
+.pins{display:flex;gap:1rem}
+.f{outline:none;color:inherit;font:inherit;background:var(--glass);border:1px solid var(--edge);border-radius:1.6rem;-webkit-backdrop-filter:blur(1.4rem) saturate(1.4);backdrop-filter:blur(1.4rem) saturate(1.4);transition:transform .35s cubic-bezier(.2,1.3,.4,1),background .25s,box-shadow .35s}
+.f:focus{transform:scale(1.1);background:rgba(255,255,255,.2);box-shadow:0 1.2rem 3rem rgba(0,0,0,.45),0 0 0 .18rem rgba(255,255,255,.75)}
+.pin{padding:1rem 2rem;font-size:1.4rem}
+main{position:relative;height:calc(100vh - 14rem);overflow:hidden;padding:2rem 5rem;scroll-behavior:smooth}
+#g{display:grid;grid-template-columns:repeat(auto-fill,11rem);gap:2rem;justify-content:start;padding-bottom:6rem}
+.a{height:11rem;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.8rem;font-size:1.2rem;padding:.8rem}
+.a img{width:4.8rem;height:4.8rem;border-radius:1rem}
+.a span{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.f{background:rgba(40,48,80,.75)}}
+@media (prefers-reduced-motion:reduce){.bg i{animation:none}}
+</style></head><body>
+<div class="bg"><i></i><i></i><i></i></div>
+<header><div><div id="t"></div><div id="d"></div></div><div class="pins" id="p"></div></header>
+<main id="m"><div id="g"></div></main>
+<script>
+// Edit these: pinned shortcuts (package names) and apps to hide.
+const PINS=[{p:'com.hisilicon.tv.menu',l:'Projector menu'},{p:'com.newlink.hisetting',l:'Settings'}];
+const HIDE=['com.hisilicon.hifactory','com.newlink.factorymenu','com.newlink.tvtestingtools','com.newlink.isuperred.ijkplayerdemo','com.example.bluetoothsetting'];
+const A=window.Android, $=id=>document.getElementById(id);
+function clock(){const n=new Date();$('t').textContent=n.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});$('d').textContent=n.toLocaleDateString([],{weekday:'long',day:'numeric',month:'long'})}
+clock();setInterval(clock,10000);
+function btn(cls,html,p){const b=document.createElement('button');b.className='f '+cls;b.innerHTML=html;b.onclick=()=>A?A.launch(p):0;return b}
+let list;try{list=JSON.parse(A.apps())}catch(e){list=['Videos','Music','Files','Browser','Gallery','Cast'].map(n=>({p:n,l:n,i:''}))}
+list.filter(x=>!HIDE.includes(x.p)).sort((a,b)=>a.l.localeCompare(b.l)).forEach(x=>{
+  const b=btn('a',(x.i?'<img src="'+x.i+'">':'')+'<span></span>',x.p);b.querySelector('span').textContent=x.l;$('g').appendChild(b)});
+PINS.forEach(x=>{const b=btn('pin','<span></span>',x.p);b.firstChild.textContent=x.l;$('p').appendChild(b)});
+const all=()=>[...document.querySelectorAll('.f')];
+function focusEl(e){e.focus({preventScroll:true});e.scrollIntoView({block:'center',behavior:'smooth'})}
+function goHome(){const f=document.querySelector('.a');if(f)focusEl(f);$('m').scrollTop=0}
+goHome();
+document.addEventListener('keydown',ev=>{
+  const k=ev.key,cur=document.activeElement;
+  if(k==='Enter'&&cur&&cur.classList.contains('f')){ev.preventDefault();cur.click();return}
+  if(!k.startsWith('Arrow'))return;ev.preventDefault();
+  if(!cur||!cur.classList.contains('f')){goHome();return}
+  const r=cur.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;let best=null,bs=1e9;
+  for(const e of all()){if(e===cur)continue;const q=e.getBoundingClientRect(),dx=q.left+q.width/2-cx,dy=q.top+q.height/2-cy;
+    let main,cross,ok;
+    if(k==='ArrowRight'){main=dx;cross=Math.abs(dy);ok=dx>10&&cross<r.height*.6}
+    else if(k==='ArrowLeft'){main=-dx;cross=Math.abs(dy);ok=dx<-10&&cross<r.height*.6}
+    else if(k==='ArrowDown'){main=dy;cross=Math.abs(dx);ok=dy>10}
+    else{main=-dy;cross=Math.abs(dx);ok=dy<-10}
+    if(ok&&main+cross*2<bs){bs=main+cross*2;best=e}}
+  if(best)focusEl(best)});
+</script></body></html>
