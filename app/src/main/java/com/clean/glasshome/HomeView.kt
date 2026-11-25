@@ -10,8 +10,6 @@ import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
 import android.graphics.RadialGradient
 import android.graphics.Rect
 import android.graphics.RectF
@@ -31,7 +29,6 @@ import java.util.Locale
 import java.util.TimeZone
 import kotlin.math.abs
 import kotlin.math.cos
-import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
@@ -52,11 +49,6 @@ class HomeView(ctx: Context) : View(ctx) {
     private var prevLabel: CharSequence = ""
     private var prevSub: CharSequence = ""
     private var last = 0L
-
-    private var ambR = Color.red(Catalog.DEF).toFloat()
-    private var ambG = Color.green(Catalog.DEF).toFloat()
-    private var ambB = Color.blue(Catalog.DEF).toFloat()
-    private var ambRgb = 0
 
     private var bg: Bitmap? = null
     private val bgDst = Rect()
@@ -106,7 +98,6 @@ class HomeView(ctx: Context) : View(ctx) {
     private val pillStroke = strokePaint()
     private val glyphP = strokePaint().also { it.strokeCap = Paint.Cap.ROUND; it.strokeJoin = Paint.Join.ROUND }
     private val glyphFill = fillPaint().also { it.color = Color.WHITE }
-    private val glowP = fillPaint()
 
     private val prefs = ctx.getSharedPreferences("last", Context.MODE_PRIVATE)
     private val timeFmt = DateFormat.getTimeFormat(ctx)
@@ -117,14 +108,13 @@ class HomeView(ctx: Context) : View(ctx) {
     private var dateStr = ""
     private var timeW = 0f
     private val tick = object : Runnable {
-        override fun run() { invalidate(); postDelayed(this, 20000) }
+        override fun run() { invalidate(); postDelayed(this, 60000) }
     }
 
     init {
         isFocusable = true
         isFocusableInTouchMode = true
         if (Build.VERSION.SDK_INT >= 26) defaultFocusHighlightEnabled = false
-        glowP.colorFilter = PorterDuffColorFilter(Catalog.DEF, PorterDuff.Mode.SRC_IN)
     }
 
     override fun onAttachedToWindow() {
@@ -196,14 +186,23 @@ class HomeView(ctx: Context) : View(ctx) {
     }
 
     private fun makeBg(w: Int, h: Int) {
-        val bw = max(1, w / 4)
-        val bh = max(1, h / 4)
+        // Render once at one-third resolution and scale it; RGB_565 halves wallpaper memory.
+        val bw = max(1, w / 3)
+        val bh = max(1, h / 3)
         bg?.recycle()
-        val b = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+        val b = Bitmap.createBitmap(bw, bh, Bitmap.Config.RGB_565)
         val c = Canvas(b)
         val p = Paint(Paint.DITHER_FLAG)
-        p.shader = LinearGradient(0f, 0f, 0f, bh.toFloat(), 0xFF070A14.toInt(), 0xFF0E1226.toInt(), Shader.TileMode.CLAMP)
+        p.shader = LinearGradient(0f, 0f, bw.toFloat(), bh.toFloat(),
+            0xFF080D1B.toInt(), 0xFF17152F.toInt(), Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, bw.toFloat(), bh.toFloat(), p)
+        p.shader = RadialGradient(bw * 0.78f, bh * 0.20f, bw * 0.72f,
+            intArrayOf(0x553C82B8, 0x223C82B8, 0x003C82B8), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, bw.toFloat(), bh.toFloat(), p)
+        p.shader = RadialGradient(bw * 0.12f, bh * 0.82f, bw * 0.70f,
+            intArrayOf(0x554F3D91, 0x224F3D91, 0x004F3D91), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, bw.toFloat(), bh.toFloat(), p)
+        p.shader = null
         bg = b
     }
 
@@ -265,21 +264,8 @@ class HomeView(ctx: Context) : View(ctx) {
         val fi = focusItem()
         if (fi !== heroItem) setHero(fi)
 
-        // Ambient colour follows the focused app.
-        val tc = fi?.accent ?: Catalog.DEF
-        val tr = Color.red(tc).toFloat(); val tg = Color.green(tc).toFloat(); val tb = Color.blue(tc).toFloat()
-        val f = 1f - exp(-4f * dt)
-        ambR += (tr - ambR) * f; ambG += (tg - ambG) * f; ambB += (tb - ambB) * f
-        val rgb = Color.rgb(ambR.toInt(), ambG.toInt(), ambB.toInt())
-        if (rgb != ambRgb) {
-            ambRgb = rgb
-            glowP.colorFilter = PorterDuffColorFilter(rgb, PorterDuff.Mode.SRC_IN)
-        }
-        if (abs(tr - ambR) + abs(tg - ambG) + abs(tb - ambB) > 1.5f) busy = true
-
+        // Static cached wallpaper: no per-frame blur, glow, or color animation.
         bg?.let { c.drawBitmap(it, null, bgDst, bgPaint) }
-        glowP.alpha = 200
-        c.drawRect(0f, 0f, ww, hh, glowP)
 
         // Clock and date.
         val ms = System.currentTimeMillis()

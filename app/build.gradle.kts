@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
     namespace = "com.clean.glasshome"
     compileSdk = 34
-    defaultConfig { applicationId = "com.clean.glasshome"; minSdk = 24; targetSdk = 28; versionCode = 3; versionName = "3.0" }
+    defaultConfig { applicationId = "com.clean.glasshome"; minSdk = 24; targetSdk = 28; versionCode = 4; versionName = "4.0-lite" }
     signingConfigs {
         create("fixed") {
             storeFile = file("debug.keystore"); storePassword = "android"; keyAlias = "key"; keyPassword = "android"

@@ -2,10 +2,10 @@ package com.clean.glasshome
 
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.drawable.Drawable
 import android.provider.Settings
 import kotlin.math.max
@@ -47,8 +47,8 @@ object Catalog {
                 val launch = Intent(Intent.ACTION_MAIN).addCategory(cat).setClassName(p, ai.name)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
                 val bd: Drawable? = try { ai.loadBanner(pm) ?: ai.applicationInfo.loadBanner(pm) } catch (e: Exception) { null }
-                val banner = if (bd != null) bmp(bd, 288, 162) else null
-                val icon = bmp(ri.loadIcon(pm), 96, 96)
+                val banner = if (bd != null) bmp(bd, 180, 101, Bitmap.Config.RGB_565) else null
+                val icon = bmp(ri.loadIcon(pm), 72, 72, Bitmap.Config.ARGB_8888)
                 val accent = accentOf(banner ?: icon)
                 apps.add(Item(ri.loadLabel(pm).toString(), null, p, launch, icon, banner, accent,
                     if (banner == null) tileOf(accent) else 0, Glyph.NONE))
@@ -57,28 +57,12 @@ object Catalog {
         apps.sortBy { a -> a.label.lowercase() }
         if (apps.isNotEmpty()) rows.add(Row("Apps", apps))
 
-        // Every screen the projector's own apps expose: used to find hidden menus such as keystone.
-        val sys = ArrayList<Item>()
-        for (app in pm.getInstalledApplications(0)) {
-            if (sys.size >= 48) break
-            val p = app.packageName
-            if (VENDOR.none { v -> p.startsWith(v) } || SKIP.any { s -> p.contains(s) }) continue
-            val info = try { pm.getPackageInfo(p, PackageManager.GET_ACTIVITIES) } catch (e: Exception) { continue }
-            for (a in info.activities ?: continue) {
-                if (sys.size >= 48) break
-                if (!a.exported || !a.enabled) continue
-                if (SKIP.any { s -> a.name.lowercase().contains(s) }) continue
-                val i = Intent().setClassName(p, a.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                sys.add(Item(a.loadLabel(pm).toString(), a.name.substringAfterLast('.'), null, i,
-                    bmp(a.loadIcon(pm), 64, 64), null, DEF, 0, Glyph.NONE))
-            }
-        }
-        if (sys.isNotEmpty()) rows.add(Row("System screens", sys))
+        // Keep the launcher focused on user-facing apps only.
         return Data(pills, rows)
     }
 
-    private fun bmp(d: Drawable, w: Int, h: Int): Bitmap {
-        val b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    private fun bmp(d: Drawable, w: Int, h: Int, config: Bitmap.Config = Bitmap.Config.RGB_565): Bitmap {
+        val b = Bitmap.createBitmap(w, h, config)
         d.setBounds(0, 0, w, h)
         d.draw(Canvas(b))
         return b
