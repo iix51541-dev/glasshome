@@ -1,64 +1,60 @@
 package com.clean.glasshome
 
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
-import android.graphics.*
-import android.graphics.drawable.Drawable
+import android.content.IntentFilter
 import android.os.Bundle
-import android.util.Base64
-import android.webkit.JavascriptInterface
-import android.webkit.WebView
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.ByteArrayOutputStream
+import android.view.View
 
 class MainActivity : Activity() {
-    private lateinit var web: WebView
+    private lateinit var home: HomeView
+
+    private val pkgReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) { load() }
+    }
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
-        web = WebView(this)
-        web.setBackgroundColor(Color.BLACK)
-        web.settings.javaScriptEnabled = true
-        web.addJavascriptInterface(Bridge(), "Android")
-        web.loadUrl("file:///android_asset/index.html")
-        setContentView(web)
-        web.requestFocus()
+        home = HomeView(this)
+        setContentView(home)
+        window.setBackgroundDrawable(null)
+        val f = IntentFilter()
+        f.addAction(Intent.ACTION_PACKAGE_ADDED)
+        f.addAction(Intent.ACTION_PACKAGE_REMOVED)
+        f.addAction(Intent.ACTION_PACKAGE_CHANGED)
+        f.addDataScheme("package")
+        registerReceiver(pkgReceiver, f)
+        load()
+    }
+
+    override fun onDestroy() {
+        unregisterReceiver(pkgReceiver)
+        super.onDestroy()
     }
 
     override fun onNewIntent(i: Intent?) {
         super.onNewIntent(i)
-        web.evaluateJavascript("goHome()", null)
+        home.resetFocus()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            home.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        }
     }
 
     override fun onBackPressed() {} // stay on Home
 
-    inner class Bridge {
-        @JavascriptInterface
-        fun apps(): String {
-            val out = JSONArray(); val seen = HashSet<String>()
-            for (cat in listOf(Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER)) {
-                for (ri in packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(cat), 0)) {
-                    val p = ri.activityInfo.packageName
-                    if (p == packageName || !seen.add(p)) continue
-                    out.put(JSONObject().put("p", p).put("l", ri.loadLabel(packageManager).toString())
-                        .put("i", icon(ri.loadIcon(packageManager))))
-                }
-            }
-            return out.toString()
-        }
-
-        @JavascriptInterface
-        fun launch(p: String) = runOnUiThread {
-            val i = packageManager.getLeanbackLaunchIntentForPackage(p) ?: packageManager.getLaunchIntentForPackage(p)
-            i?.let { it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(it) }
-        }
-
-        private fun icon(d: Drawable): String {
-            val bmp = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
-            d.setBounds(0, 0, 96, 96); d.draw(Canvas(bmp))
-            val s = ByteArrayOutputStream(); bmp.compress(Bitmap.CompressFormat.PNG, 90, s)
-            return "data:image/png;base64," + Base64.encodeToString(s.toByteArray(), Base64.NO_WRAP)
-        }
+    private fun load() {
+        Thread {
+            val rows = Catalog.build(this)
+            home.post { home.setRows(rows) }
+        }.start()
     }
 }
