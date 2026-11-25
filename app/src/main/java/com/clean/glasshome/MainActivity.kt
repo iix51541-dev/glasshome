@@ -53,8 +53,8 @@ class MainActivity : Activity() {
 
     private fun load() {
         Thread {
-            val rows = Catalog.build(this)
-            home.post { home.setRows(rows) }
+            val data = Catalog.build(this)
+            home.post { home.setData(data) }
         }.start()
     }
 }
