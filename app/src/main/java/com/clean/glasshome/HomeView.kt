@@ -176,8 +176,6 @@ class HomeView(ctx: Context) : View(ctx) {
         shadeP.shader = LinearGradient(0f, 0f, 0f, th, 0x00000000, 0x70000000, Shader.TileMode.CLAMP)
         glassP.shader = LinearGradient(0f, 0f, 0f, th, 0x38FFFFFF, 0x14FFFFFF, Shader.TileMode.CLAMP)
         haloP.shader = RadialGradient(tw / 2f, th / 2f, tw * 0.62f, 0x70FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP)
-        glowP.shader = RadialGradient(ww * 0.28f, hh * 0.30f, ww * 0.8f,
-            intArrayOf(0xB0FFFFFF.toInt(), 0x50FFFFFF, 0x00FFFFFF), floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP)
         bgDst.set(0, 0, w, h)
         makeBg(w, h)
         for (r in rows) for (i in r.items) { i.lbl = null; i.sbl = null; i.bp = null }
