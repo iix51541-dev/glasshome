@@ -12,7 +12,6 @@ object Glyph {
     const val BT = 2
     const val GEAR = 3
     const val DISPLAY = 4
-    const val SOUND = 5
 }
 
 /** Small damped spring used for focus motion; no animation framework required. */

@@ -33,7 +33,7 @@ object Catalog {
     )
 
     val DEFAULT_ACCENT: Int =
-        Color.HSVToColor(floatArrayOf(190f, 0.48f, 0.94f))
+        Color.HSVToColor(floatArrayOf(34f, 0.78f, 1.0f))
 
     fun build(context: Context): Data {
         val packageManager = context.packageManager
@@ -51,8 +51,11 @@ object Catalog {
         addShortcut("Wi-Fi", Settings.ACTION_WIFI_SETTINGS, Glyph.WIFI)
         addShortcut("Bluetooth", Settings.ACTION_BLUETOOTH_SETTINGS, Glyph.BT)
         addShortcut("Display", Settings.ACTION_DISPLAY_SETTINGS, Glyph.DISPLAY)
-        addShortcut("Sound", Settings.ACTION_SOUND_SETTINGS, Glyph.SOUND)
         addShortcut("Settings", Settings.ACTION_SETTINGS, Glyph.GEAR)
+        addShortcut("Manage Apps", Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS, Glyph.GEAR)
+        shortcuts.add(Item("Wallpaper", "Choose your own background", null,
+            Intent("com.clean.glasshome.PICK_WALLPAPER"), null, null,
+            0xFFFFB13B.toInt(), 0, Glyph.DISPLAY))
 
         val appItems = ArrayList<Item>()
         val seenPackages = HashSet<String>()

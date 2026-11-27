@@ -39,7 +39,7 @@ import kotlin.math.sin
  * The wallpaper is decoded once at one-third resolution. All cards, glass
  * panels and focus effects are drawn with cached Paint objects.
  */
-class HomeView(ctx: Context) : View(ctx) {
+class HomeView(ctx: Context, private val onWallpaperRequest: () -> Unit = {}) : View(ctx) {
     private var pills: List<Item> = emptyList()
     private var pillSc: Array<Sp> = emptyArray()
     private var rows: List<Row> = emptyList()
@@ -60,6 +60,7 @@ class HomeView(ctx: Context) : View(ctx) {
     private var weatherMessage = "Connect to Wi-Fi to refresh local conditions"
 
     private var bg: Bitmap? = null
+    private var customWallpaper = false
     private val bgDst = Rect()
     private val bgPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
     private val scratch = RectF()
@@ -82,25 +83,25 @@ class HomeView(ctx: Context) : View(ctx) {
     private var pillSize = 0f
     private var pillGap = 0f
 
-    private fun typeface(name: String) = Typeface.create(name, Typeface.NORMAL)
+    private fun typeface(name: String) = Typeface.create(name, Typeface.BOLD)
     private fun paint() = Paint(Paint.ANTI_ALIAS_FLAG)
     private fun strokePaint() = Paint(Paint.ANTI_ALIAS_FLAG).also {
         it.style = Paint.Style.STROKE
         it.color = Color.WHITE
     }
 
-    private val pTime = paint().also { it.color = Color.WHITE; it.typeface = typeface("sans-serif-light") }
+    private val pTime = paint().also { it.color = Color.WHITE; it.typeface = typeface("sans-serif") }
     private val pDate = paint().also { it.color = 0xDDEAF4FF.toInt(); it.typeface = typeface("sans-serif") }
-    private val pBrand = paint().also { it.color = 0xFFE4F5FF.toInt(); it.typeface = typeface("sans-serif-medium") }
-    private val pEyebrow = paint().also { it.color = 0xFF91DCE9.toInt(); it.typeface = typeface("sans-serif-medium") }
-    private val pTitle = paint().also { it.color = 0xFFEAF5FF.toInt(); it.typeface = typeface("sans-serif-medium") }
+    private val pBrand = paint().also { it.color = 0xFFFFC15A.toInt(); it.typeface = typeface("sans-serif-medium") }
+    private val pEyebrow = paint().also { it.color = 0xFFFFB13B.toInt(); it.typeface = typeface("sans-serif-medium") }
+    private val pTitle = paint().also { it.color = 0xFFFFE2B0.toInt(); it.typeface = typeface("sans-serif-medium") }
     private val pGreeting = TextPaint(Paint.ANTI_ALIAS_FLAG).also {
         it.color = Color.WHITE
-        it.typeface = typeface("sans-serif-light")
+        it.typeface = typeface("sans-serif")
     }
     private val heroP = TextPaint(Paint.ANTI_ALIAS_FLAG).also {
         it.color = Color.WHITE
-        it.typeface = typeface("sans-serif-light")
+        it.typeface = typeface("sans-serif")
     }
     private val heroS = TextPaint(Paint.ANTI_ALIAS_FLAG).also {
         it.color = 0xD9FFFFFF.toInt()
@@ -113,7 +114,7 @@ class HomeView(ctx: Context) : View(ctx) {
     }
     private val weatherLarge = TextPaint(Paint.ANTI_ALIAS_FLAG).also {
         it.color = Color.WHITE
-        it.typeface = typeface("sans-serif-light")
+        it.typeface = typeface("sans-serif")
     }
     private val weatherSmall = TextPaint(Paint.ANTI_ALIAS_FLAG).also {
         it.color = 0xDDEAF4FF.toInt()
@@ -178,6 +179,15 @@ class HomeView(ctx: Context) : View(ctx) {
         invalidate()
     }
 
+
+    fun setWallpaper(bitmap: Bitmap) {
+        customWallpaper = true
+        val old = bg
+        bg = bitmap
+        if (old != null && old !== bitmap && !old.isRecycled) old.recycle()
+        invalidate()
+    }
+
     fun setWeather(info: WeatherInfo?) {
         weather = info
         weatherMessage = if (info == null) "Weather is temporarily unavailable" else ""
@@ -235,22 +245,22 @@ class HomeView(ctx: Context) : View(ctx) {
         val s = hh * 0.008f
         scrim.shader = LinearGradient(
             0f, 0f, 0f, hh,
-            intArrayOf(0x15030A18, 0x1A030A18, 0x9D030914.toInt(), 0xD9060D1A.toInt()),
+            intArrayOf(0x10000000, 0x30000000, 0xB0000000.toInt(), 0xE6000000.toInt()),
             floatArrayOf(0f, 0.34f, 0.78f, 1f),
             Shader.TileMode.CLAMP
         )
         glassFill.shader = LinearGradient(
             0f, 0f, 0f, hh * 0.30f,
-            0x56FFFFFF, 0x1AFFFFFF, Shader.TileMode.CLAMP
+            0x241A1208, 0x10100A04, Shader.TileMode.CLAMP
         )
         halo.shader = RadialGradient(
             tw / 2f, th / 2f, tw * 0.72f,
-            intArrayOf(0x6A82E8F5, 0x3082E8F5, 0x0082E8F5),
+            intArrayOf(0x66FFB13B, 0x30FF8A20, 0x00FF8A20),
             floatArrayOf(0f, 0.48f, 1f), Shader.TileMode.CLAMP
         )
         glassEdge.strokeWidth = strokeW
         edge.strokeWidth = strokeW
-        ring.color = 0xFFD8F5FF.toInt()
+        ring.color = 0xFFFFB13B.toInt()
         ring.strokeWidth = strokeW * 1.55f
         divider.strokeWidth = max(1.2f, hh * 0.0014f)
         bgDst.set(0, 0, w, h)
@@ -265,6 +275,7 @@ class HomeView(ctx: Context) : View(ctx) {
     }
 
     private fun makeWallpaper(w: Int, h: Int) {
+        if (customWallpaper) return
         val targetW = max(1, w / 3)
         val targetH = max(1, h / 3)
         var decoded: Bitmap? = null
@@ -293,12 +304,12 @@ class HomeView(ctx: Context) : View(ctx) {
             val p = Paint(Paint.ANTI_ALIAS_FLAG)
             p.shader = LinearGradient(
                 0f, 0f, targetW.toFloat(), targetH.toFloat(),
-                0xFF071426.toInt(), 0xFF1B2040.toInt(), Shader.TileMode.CLAMP
+                0xFF090807.toInt(), 0xFF24170B.toInt(), Shader.TileMode.CLAMP
             )
             canvas.drawRect(0f, 0f, targetW.toFloat(), targetH.toFloat(), p)
             p.shader = RadialGradient(
                 targetW * 0.68f, targetH * 0.28f, targetW * 0.65f,
-                0x8053DCEB.toInt(), 0x003B4D84, Shader.TileMode.CLAMP
+                0x80FF9A24.toInt(), 0x00FF9A24, Shader.TileMode.CLAMP
             )
             canvas.drawRect(0f, 0f, targetW.toFloat(), targetH.toFloat(), p)
             p.shader = null
@@ -417,7 +428,7 @@ class HomeView(ctx: Context) : View(ctx) {
         // Quick settings shortcuts.
         for (i in pills.indices) {
             val focused = onBar && i == ti
-            if (pillSc[i].go(if (focused) 1.14f else 1f, 390f, 28f, dt)) animating = true
+            pillSc[i].x = if (focused) 1.04f else 1f
             drawPill(canvas, pills[i], pillCenterX(i), pillCenterY(), pillSc[i].x)
         }
 
@@ -427,10 +438,11 @@ class HomeView(ctx: Context) : View(ctx) {
         pGreeting.alpha = 255
         canvas.drawText("Settle in.", margin, hh * 0.335f, pGreeting)
 
-        if (heroA.go(1f, 260f, 32f, dt)) animating = true
-        val heroAlpha = (1f - frAnim.x).coerceIn(0f, 1f)
+        heroA.x = 1f
+        frAnim.x = fr.toFloat()
+        val heroAlpha = 1f
         if (heroAlpha > 0.01f) {
-            val blend = heroA.x.coerceIn(0f, 1f)
+            val blend = 1f
             val x = margin
             val y = hh * 0.425f
             if (blend < 0.99f) {
@@ -448,7 +460,7 @@ class HomeView(ctx: Context) : View(ctx) {
         drawWeather(canvas)
 
         // Rows move like a soft carousel. There are no per-frame allocations.
-        if (frAnim.go(fr.toFloat(), 220f, 30f, dt)) animating = true
+        frAnim.x = fr.toFloat()
         val viewportWidth = ww - 2f * margin - 2f * padC
         for (r in rows.indices) {
             val row = rows[r]
@@ -456,11 +468,11 @@ class HomeView(ctx: Context) : View(ctx) {
             val alpha = rowAlpha(distance)
             val maxScroll = max(0f, row.items.size * pitch - gap - viewportWidth)
             val targetScroll = min(max(0, row.idx - 1) * pitch, maxScroll)
-            if (row.scroll.go(targetScroll, 220f, 30f, dt, 0.3f)) animating = true
+            row.scroll.x = targetScroll
 
             for (i in row.items.indices) {
                 val focused = !onBar && r == fr && i == row.idx
-                if (row.sc[i].go(if (focused) 1.075f else 1f, 390f, 28f, dt)) animating = true
+                row.sc[i].x = if (focused) 1.025f else 1f
             }
             if (alpha <= 0.01f) continue
 
@@ -485,7 +497,7 @@ class HomeView(ctx: Context) : View(ctx) {
         appNameP.alpha = 170
         canvas.drawText("←  →  BROWSE     OK  OPEN     ↑  QUICK SETTINGS", margin, hh * 0.985f, appNameP)
 
-        if (animating) postInvalidateOnAnimation() else lastFrame = 0L
+        lastFrame = 0L
     }
 
     private fun drawWeather(canvas: Canvas) {
@@ -502,7 +514,7 @@ class HomeView(ctx: Context) : View(ctx) {
 
         appNameP.textAlign = Paint.Align.LEFT
         appNameP.textSize = hh * 0.015f
-        appNameP.color = 0xFF92DCEB.toInt()
+        appNameP.color = 0xFFFFB13B.toInt()
         appNameP.alpha = 230
         canvas.drawText("LOCAL WEATHER", left + hh * 0.026f, top + hh * 0.050f, appNameP)
 
@@ -564,10 +576,7 @@ class HomeView(ctx: Context) : View(ctx) {
         fill.alpha = (75f * alpha).toInt()
         scratch.set(0f, hh * 0.006f, tw, th + hh * 0.006f)
         canvas.drawRoundRect(scratch, radius, radius, fill)
-        if (progress > 0.02f) {
-            halo.alpha = (125f * progress * alpha).toInt()
-            canvas.drawRoundRect(-tw * 0.13f, -th * 0.18f, tw * 1.13f, th * 1.18f, radius * 1.4f, radius * 1.4f, halo)
-        }
+        // No animated glow: focus is indicated by a simple gold outline.
 
         val imageAlpha = (255f * alpha).toInt()
         val banner = item.banner
@@ -575,15 +584,11 @@ class HomeView(ctx: Context) : View(ctx) {
             val bannerPaint = item.bp ?: makeBitmapPaint(item, banner)
             bannerPaint.alpha = imageAlpha
             canvas.drawRoundRect(0f, 0f, tw, th, radius, radius, bannerPaint)
-            // Bottom fade keeps the label readable on artwork.
-            val saved = fill.shader
-            fill.shader = LinearGradient(
-                0f, th * 0.48f, 0f, th,
-                0x00000000, 0x66000000, Shader.TileMode.CLAMP
-            )
+            // A flat translucent footer avoids allocating a gradient every frame.
+            fill.shader = null
+            fill.color = 0x55000000
             fill.alpha = imageAlpha
-            canvas.drawRoundRect(0f, 0f, tw, th, radius, radius, fill)
-            fill.shader = saved
+            canvas.drawRect(0f, th * 0.78f, tw, th, fill)
         } else {
             fill.color = if (item.tile != 0) item.tile else 0x553C6580
             fill.alpha = imageAlpha
@@ -600,8 +605,8 @@ class HomeView(ctx: Context) : View(ctx) {
         edge.alpha = (60f * (1f - progress) * alpha).toInt()
         edge.strokeWidth = strokeW
         canvas.drawRoundRect(0f, 0f, tw, th, radius, radius, edge)
-        if (focused || progress > 0.02f) {
-            ring.alpha = (220f * max(progress, if (focused) 0.68f else 0f) * alpha).toInt()
+        if (focused) {
+            ring.alpha = (220f * alpha).toInt()
             val out = ring.strokeWidth * 0.75f
             canvas.drawRoundRect(-out, -out, tw + out, th + out, radius + out, radius + out, ring)
         }
@@ -673,23 +678,15 @@ class HomeView(ctx: Context) : View(ctx) {
                 canvas.drawLine(0f, size * 0.18f, 0f, size * 0.29f, glyphStroke)
                 canvas.drawLine(-size * 0.16f, size * 0.29f, size * 0.16f, size * 0.29f, glyphStroke)
             }
-            Glyph.SOUND -> {
-                glyphPath.reset()
-                glyphPath.moveTo(-size * 0.27f, -size * 0.10f)
-                glyphPath.lineTo(-size * 0.12f, -size * 0.10f)
-                glyphPath.lineTo(size * 0.06f, -size * 0.25f)
-                glyphPath.lineTo(size * 0.06f, size * 0.25f)
-                glyphPath.lineTo(-size * 0.12f, size * 0.10f)
-                glyphPath.lineTo(-size * 0.27f, size * 0.10f)
-                glyphPath.close()
-                canvas.drawPath(glyphPath, glyphStroke)
-                scratch.set(-size * 0.14f, -size * 0.34f, size * 0.50f, size * 0.34f)
-                canvas.drawArc(scratch, -50f, 100f, false, glyphStroke)
-            }
+
         }
     }
 
     private fun open(item: Item) {
+        if (item.intent.action == "com.clean.glasshome.PICK_WALLPAPER") {
+            onWallpaperRequest()
+            return
+        }
         item.pkg?.let { prefs.edit().putLong(it, System.currentTimeMillis()).apply() }
         try {
             context.startActivity(Intent(item.intent))

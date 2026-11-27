@@ -8,8 +8,8 @@ android {
         applicationId = "com.clean.glasshome"
         minSdk = 24
         targetSdk = 28
-        versionCode = 5
-        versionName = "5.0"
+        versionCode = 6
+        versionName = "5.1"
     }
 
     signingConfigs {
