@@ -10,17 +10,19 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
+import android.widget.Toast
+import java.io.File
 
 class MainActivity : Activity() {
     companion object { private const val REQUEST_WALLPAPER = 5102 }
+
     private lateinit var home: HomeView
     private var receiverRegistered = false
     @Volatile private var weatherRequestRunning = false
+    private val wallpaperFile by lazy { File(filesDir, "glasshome-wallpaper.img") }
 
     private val packageReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            loadApps()
-        }
+        override fun onReceive(context: Context?, intent: Intent?) { loadApps() }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,6 +47,7 @@ class MainActivity : Activity() {
         if (::home.isInitialized) {
             loadApps()
             refreshWeather()
+            home.animateReturn()
         }
         applyImmersiveMode()
     }
@@ -79,7 +82,7 @@ class MainActivity : Activity() {
     }
 
     override fun onBackPressed() {
-        // A TV launcher remains at Home; app navigation is handled by the system.
+        if (::home.isInitialized) home.returnToDock()
     }
 
     private fun loadApps() {
@@ -89,72 +92,109 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (!isFinishing && ::home.isInitialized) home.setData(data)
                 }
-            } catch (_: Exception) {
-                // Keep the already-rendered home screen if package discovery fails.
-            }
+            } catch (_: Exception) { }
         }.start()
     }
 
     private fun pickWallpaper() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+        val documentIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "image/*"
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         try {
-            startActivityForResult(intent, REQUEST_WALLPAPER)
+            startActivityForResult(documentIntent, REQUEST_WALLPAPER)
         } catch (_: Exception) {
-            val fallback = Intent(Intent.ACTION_GET_CONTENT).apply { type = "image/*" }
-            try { startActivityForResult(fallback, REQUEST_WALLPAPER) }
-            catch (_: Exception) { android.widget.Toast.makeText(this, "No image picker is available", android.widget.Toast.LENGTH_SHORT).show() }
+            val contentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                type = "image/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+            }
+            try {
+                startActivityForResult(Intent.createChooser(contentIntent, "Choose wallpaper"), REQUEST_WALLPAPER)
+            } catch (_: Exception) {
+                Toast.makeText(this, "No image picker is available on this projector", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
     @Deprecated("Legacy result API is retained for Android 9 compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQUEST_WALLPAPER || resultCode != RESULT_OK) return
-        val uri = data?.data ?: return
-        try {
-            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        } catch (_: Exception) { /* Some fallback providers grant temporary access only. */ }
-        getSharedPreferences("wallpaper", Context.MODE_PRIVATE).edit().putString("uri", uri.toString()).apply()
-        loadWallpaper(uri)
+        if (requestCode != REQUEST_WALLPAPER) return
+        if (resultCode != RESULT_OK) return
+        val uri = data?.data
+        if (uri == null) {
+            Toast.makeText(this, "No image was selected", Toast.LENGTH_SHORT).show()
+            return
+        }
+        copyAndApplyWallpaper(uri)
+    }
+
+    /** Copy the chosen image into app-private storage so it never depends on a temporary URI grant. */
+    private fun copyAndApplyWallpaper(uri: Uri) {
+        Thread {
+            var decoded: Bitmap? = null
+            try {
+                val temp = File(filesDir, "glasshome-wallpaper.tmp")
+                contentResolver.openInputStream(uri)?.use { input ->
+                    temp.outputStream().use { output -> input.copyTo(output) }
+                } ?: throw IllegalStateException("The selected image could not be opened")
+
+                decoded = decodeWallpaper(temp)
+                    ?: throw IllegalArgumentException("The selected file is not a supported image")
+
+                if (wallpaperFile.exists()) wallpaperFile.delete()
+                if (!temp.renameTo(wallpaperFile)) {
+                    temp.copyTo(wallpaperFile, overwrite = true)
+                    temp.delete()
+                }
+                val bitmap = decoded
+                runOnUiThread {
+                    if (!isFinishing && ::home.isInitialized && bitmap != null) {
+                        home.setWallpaper(bitmap)
+                        Toast.makeText(this, "Wallpaper applied", Toast.LENGTH_SHORT).show()
+                    } else bitmap?.recycle()
+                }
+            } catch (error: Exception) {
+                decoded?.recycle()
+                runOnUiThread {
+                    Toast.makeText(this, "Couldn't apply wallpaper: ${error.message ?: "unsupported image"}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
     }
 
     private fun restoreWallpaper() {
-        val value = getSharedPreferences("wallpaper", Context.MODE_PRIVATE).getString("uri", null) ?: return
-        try { loadWallpaper(Uri.parse(value)) } catch (_: Exception) { }
-    }
-
-    private fun loadWallpaper(uri: Uri) {
+        if (!wallpaperFile.exists()) return
         Thread {
-            val bitmap = try {
-                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-                val sample = maxOf(1, maxOf(bounds.outWidth / 1600, bounds.outHeight / 900))
-                val options = BitmapFactory.Options().apply {
-                    inSampleSize = sample
-                    inPreferredConfig = Bitmap.Config.RGB_565
-                    inDither = true
-                }
-                contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
-            } catch (_: Exception) { null }
+            val bitmap = decodeWallpaper(wallpaperFile)
             if (bitmap != null) runOnUiThread {
                 if (!isFinishing && ::home.isInitialized) home.setWallpaper(bitmap) else bitmap.recycle()
             }
         }.start()
     }
 
+    private fun decodeWallpaper(file: File): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (bounds.outWidth / sample > 1600 || bounds.outHeight / sample > 900) sample *= 2
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.RGB_565
+            inDither = true
+        }
+        return BitmapFactory.decodeFile(file.absolutePath, options)
+    }
+
     private fun refreshWeather() {
         val store = getSharedPreferences("weather", Context.MODE_PRIVATE)
         val cached = readCachedWeather(store)
         home.setWeather(cached)
-
         val lastAttempt = store.getLong("last_attempt", 0L)
         val now = System.currentTimeMillis()
         if (weatherRequestRunning || now - lastAttempt < 10 * 60 * 1000L) return
-
         weatherRequestRunning = true
         Thread {
             val fresh = WeatherService.fetch()
@@ -189,8 +229,6 @@ class MainActivity : Activity() {
                 humidity = store.getInt("humidity", 0),
                 windKmh = store.getInt("wind", 0)
             )
-        } catch (_: Exception) {
-            null
-        }
+        } catch (_: Exception) { null }
     }
 }

@@ -3,34 +3,14 @@ package com.clean.glasshome
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Paint
-import kotlin.math.abs
-import kotlin.math.min
 
 object Glyph {
     const val NONE = 0
     const val WIFI = 1
-    const val BT = 2
-    const val GEAR = 3
-    const val DISPLAY = 4
-}
-
-/** Small damped spring used for focus motion; no animation framework required. */
-class Sp(var x: Float, var v: Float = 0f) {
-    fun go(t: Float, k: Float, c: Float, dt: Float, e: Float = 0.002f): Boolean {
-        var left = dt
-        while (left > 0f) {
-            val h = min(left, 0.008f)
-            v += ((t - x) * k - v * c) * h
-            x += v * h
-            left -= h
-        }
-        if (abs(t - x) < e && abs(v) < e * 10f) {
-            x = t
-            v = 0f
-            return false
-        }
-        return true
-    }
+    const val SETTINGS = 2
+    const val APPS = 3
+    const val STORE = 4
+    const val WALLPAPER = 5
 }
 
 class Item(
@@ -49,12 +29,7 @@ class Item(
     var sbl: CharSequence? = null
 }
 
-class Row(val title: String, val items: List<Item>) {
-    val sc = Array(items.size) { Sp(1f) }
-    val scroll = Sp(0f)
-    var idx = 0
-}
-
+class Row(val title: String, val items: List<Item>)
 class Data(val pills: List<Item>, val rows: List<Row>)
 
 data class WeatherInfo(
