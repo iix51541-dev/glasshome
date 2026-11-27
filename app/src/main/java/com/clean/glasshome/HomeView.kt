@@ -700,8 +700,12 @@ class HomeView(ctx: Context, private val onWallpaperRequest: () -> Unit = {}) : 
         }
         item.pkg?.let { prefs.edit().putLong(it, System.currentTimeMillis()).apply() }
         try {
-            context.startActivity(Intent(item.intent))
-            if (context is Activity) context.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+            val ctx = context
+            ctx.startActivity(Intent(item.intent))
+            (ctx as? Activity)?.overridePendingTransition(
+                android.R.anim.fade_in,
+                android.R.anim.fade_out
+            )
         } catch (_: Exception) {
             Toast.makeText(context, "Can't open ${item.label}", Toast.LENGTH_SHORT).show()
         }
