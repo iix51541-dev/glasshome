@@ -11,6 +11,12 @@ object Glyph {
     const val APPS = 3
     const val STORE = 4
     const val WALLPAPER = 5
+    const val SYSTEM = 6
+    const val PREV = 7
+    const val NEXT = 8
+    const val PLAY = 9
+    const val PAUSE = 10
+    const val NOTE = 11
 }
 
 class Item(
@@ -22,7 +28,9 @@ class Item(
     val banner: Bitmap?,
     val accent: Int,
     val tile: Int,
-    val glyph: Int
+    val glyph: Int,
+    /** Pre-rendered, rounded dock tile (same size/shape for every app). */
+    val art: Bitmap? = null
 ) {
     var bp: Paint? = null
     var lbl: CharSequence? = null

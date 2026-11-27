@@ -7,30 +7,35 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.net.Uri
 import android.os.Bundle
 import android.view.View
-import android.widget.Toast
 import java.io.File
 
 class MainActivity : Activity() {
-    companion object { private const val REQUEST_WALLPAPER = 5102 }
-
     private lateinit var home: HomeView
+    private var mediaMonitor: MediaMonitor? = null
     private var receiverRegistered = false
     @Volatile private var weatherRequestRunning = false
+    @Volatile private var loadGeneration = 0
     private val wallpaperFile by lazy { File(filesDir, "glasshome-wallpaper.img") }
 
     private val packageReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) { loadApps() }
+        override fun onReceive(context: Context?, intent: Intent?) {
+            Catalog.invalidate(intent?.data?.schemeSpecificPart)
+            loadApps()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        home = HomeView(this) { pickWallpaper() }
+        home = HomeView(this)
         setContentView(home)
         window.setBackgroundDrawable(null)
         restoreWallpaper()
+
+        mediaMonitor = MediaMonitor(applicationContext) { info ->
+            runOnUiThread { if (!isFinishing && ::home.isInitialized) home.setMedia(info) }
+        }
 
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_PACKAGE_ADDED)
@@ -47,9 +52,16 @@ class MainActivity : Activity() {
         if (::home.isInitialized) {
             loadApps()
             refreshWeather()
-            home.animateReturn()
+            home.onHostResume()
+            mediaMonitor?.start()
         }
         applyImmersiveMode()
+    }
+
+    override fun onPause() {
+        if (::home.isInitialized) home.onHostPause()
+        mediaMonitor?.stop()
+        super.onPause()
     }
 
     override fun onDestroy() {
@@ -57,6 +69,8 @@ class MainActivity : Activity() {
             unregisterReceiver(packageReceiver)
             receiverRegistered = false
         }
+        mediaMonitor?.stop()
+        mediaMonitor = null
         if (::home.isInitialized) home.release()
         super.onDestroy()
     }
@@ -86,88 +100,23 @@ class MainActivity : Activity() {
     }
 
     private fun loadApps() {
+        // Only the newest request is applied, so overlapping reloads can never apply stale data.
+        val generation = ++loadGeneration
         Thread {
             try {
                 val data = Catalog.build(applicationContext)
                 runOnUiThread {
-                    if (!isFinishing && ::home.isInitialized) home.setData(data)
+                    if (!isFinishing && ::home.isInitialized && generation == loadGeneration) home.setData(data)
                 }
-            } catch (_: Exception) { }
+            } catch (_: Throwable) { }
         }.start()
     }
 
-    private fun pickWallpaper() {
-        val documentIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "image/*"
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        try {
-            startActivityForResult(documentIntent, REQUEST_WALLPAPER)
-        } catch (_: Exception) {
-            val contentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                type = "image/*"
-                addCategory(Intent.CATEGORY_OPENABLE)
-            }
-            try {
-                startActivityForResult(Intent.createChooser(contentIntent, "Choose wallpaper"), REQUEST_WALLPAPER)
-            } catch (_: Exception) {
-                Toast.makeText(this, "No image picker is available on this projector", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    @Deprecated("Legacy result API is retained for Android 9 compatibility")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQUEST_WALLPAPER) return
-        if (resultCode != RESULT_OK) return
-        val uri = data?.data
-        if (uri == null) {
-            Toast.makeText(this, "No image was selected", Toast.LENGTH_SHORT).show()
-            return
-        }
-        copyAndApplyWallpaper(uri)
-    }
-
-    /** Copy the chosen image into app-private storage so it never depends on a temporary URI grant. */
-    private fun copyAndApplyWallpaper(uri: Uri) {
-        Thread {
-            var decoded: Bitmap? = null
-            try {
-                val temp = File(filesDir, "glasshome-wallpaper.tmp")
-                contentResolver.openInputStream(uri)?.use { input ->
-                    temp.outputStream().use { output -> input.copyTo(output) }
-                } ?: throw IllegalStateException("The selected image could not be opened")
-
-                decoded = decodeWallpaper(temp)
-                    ?: throw IllegalArgumentException("The selected file is not a supported image")
-
-                if (wallpaperFile.exists()) wallpaperFile.delete()
-                if (!temp.renameTo(wallpaperFile)) {
-                    temp.copyTo(wallpaperFile, overwrite = true)
-                    temp.delete()
-                }
-                val bitmap = decoded
-                runOnUiThread {
-                    if (!isFinishing && ::home.isInitialized && bitmap != null) {
-                        home.setWallpaper(bitmap)
-                        Toast.makeText(this, "Wallpaper applied", Toast.LENGTH_SHORT).show()
-                    } else bitmap?.recycle()
-                }
-            } catch (error: Exception) {
-                decoded?.recycle()
-                runOnUiThread {
-                    Toast.makeText(this, "Couldn't apply wallpaper: ${error.message ?: "unsupported image"}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }.start()
-    }
-
+    /** Restores a wallpaper chosen in an earlier version; otherwise the built-in wallpaper is used. */
     private fun restoreWallpaper() {
         if (!wallpaperFile.exists()) return
         Thread {
-            val bitmap = decodeWallpaper(wallpaperFile)
+            val bitmap = try { decodeWallpaper(wallpaperFile) } catch (_: Throwable) { null }
             if (bitmap != null) runOnUiThread {
                 if (!isFinishing && ::home.isInitialized) home.setWallpaper(bitmap) else bitmap.recycle()
             }
