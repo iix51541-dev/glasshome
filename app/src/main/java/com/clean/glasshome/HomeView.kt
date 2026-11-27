@@ -3,6 +3,7 @@ package com.clean.glasshome
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
@@ -33,14 +34,19 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
-/** One custom-drawn view: no layouts, no WebView, no libraries. Light on RAM and CPU. */
+/**
+ * GlassHome 5.0: a single hardware-accelerated Canvas view.
+ * The wallpaper is decoded once at one-third resolution. All cards, glass
+ * panels and focus effects are drawn with cached Paint objects.
+ */
 class HomeView(ctx: Context) : View(ctx) {
     private var pills: List<Item> = emptyList()
-    private var pillSc: Array<Sp> = emptyArray<Sp>()
+    private var pillSc: Array<Sp> = emptyArray()
     private var rows: List<Row> = emptyList()
     private var fr = 0
     private var ti = 0
     private var onBar = false
+
     private val frAnim = Sp(0f)
     private val heroA = Sp(1f)
     private var heroItem: Item? = null
@@ -48,15 +54,18 @@ class HomeView(ctx: Context) : View(ctx) {
     private var heroSub: CharSequence = ""
     private var prevLabel: CharSequence = ""
     private var prevSub: CharSequence = ""
-    private var last = 0L
+    private var lastFrame = 0L
+
+    private var weather: WeatherInfo? = null
+    private var weatherMessage = "Connect to Wi-Fi to refresh local conditions"
 
     private var bg: Bitmap? = null
     private val bgDst = Rect()
-    private val bgPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-    private val tmp = RectF()
+    private val bgPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+    private val scratch = RectF()
     private val iconRect = RectF()
     private val sysIcon = RectF()
-    private val gp = Path()
+    private val glyphPath = Path()
 
     private var ww = 0f
     private var hh = 0f
@@ -68,47 +77,79 @@ class HomeView(ctx: Context) : View(ctx) {
     private var margin = 0f
     private var rowPitch = 0f
     private var dockY = 0f
-    private var rad = 0f
-    private var sw = 1.5f
-    private var pd = 0f
-    private var pg = 0f
+    private var radius = 0f
+    private var strokeW = 1.5f
+    private var pillSize = 0f
+    private var pillGap = 0f
 
-    private fun tf(name: String) = Typeface.create(name, Typeface.NORMAL)
-    private fun fillPaint() = Paint(Paint.ANTI_ALIAS_FLAG)
-    private fun strokePaint() = Paint(Paint.ANTI_ALIAS_FLAG).also { it.style = Paint.Style.STROKE; it.color = Color.WHITE }
+    private fun typeface(name: String) = Typeface.create(name, Typeface.NORMAL)
+    private fun paint() = Paint(Paint.ANTI_ALIAS_FLAG)
+    private fun strokePaint() = Paint(Paint.ANTI_ALIAS_FLAG).also {
+        it.style = Paint.Style.STROKE
+        it.color = Color.WHITE
+    }
 
-    private val pTime = fillPaint().also { it.color = Color.WHITE; it.typeface = tf("sans-serif-light") }
-    private val pDate = fillPaint().also { it.color = Color.WHITE; it.typeface = tf("sans-serif") }
-    private val pTitle = fillPaint().also { it.color = Color.WHITE; it.typeface = tf("sans-serif-medium") }
-    private val heroP = TextPaint(Paint.ANTI_ALIAS_FLAG).also { it.color = Color.WHITE; it.typeface = tf("sans-serif-light") }
-    private val heroS = TextPaint(Paint.ANTI_ALIAS_FLAG).also { it.color = Color.WHITE; it.typeface = tf("sans-serif") }
-    private val pInL = TextPaint(Paint.ANTI_ALIAS_FLAG).also { it.color = Color.WHITE; it.typeface = tf("sans-serif-medium") }
-    private val pInS = TextPaint(Paint.ANTI_ALIAS_FLAG).also { it.color = Color.WHITE; it.typeface = tf("sans-serif") }
-    private val divP = fillPaint().also { it.color = Color.WHITE; it.strokeWidth = 2f }
-    private val fill = fillPaint()
-    private val shadeP = fillPaint()
-    private val glassP = fillPaint()
-    private val haloP = fillPaint()
-    private val ringP = strokePaint()
-    private val edgeP = strokePaint()
-    private val bmpP = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
-    private val dockFill = fillPaint().also { it.color = Color.WHITE }
-    private val dockStroke = strokePaint()
-    private val pillFill = fillPaint().also { it.color = Color.WHITE }
+    private val pTime = paint().also { it.color = Color.WHITE; it.typeface = typeface("sans-serif-light") }
+    private val pDate = paint().also { it.color = 0xDDEAF4FF.toInt(); it.typeface = typeface("sans-serif") }
+    private val pBrand = paint().also { it.color = 0xFFE4F5FF.toInt(); it.typeface = typeface("sans-serif-medium") }
+    private val pEyebrow = paint().also { it.color = 0xFF91DCE9.toInt(); it.typeface = typeface("sans-serif-medium") }
+    private val pTitle = paint().also { it.color = 0xFFEAF5FF.toInt(); it.typeface = typeface("sans-serif-medium") }
+    private val pGreeting = TextPaint(Paint.ANTI_ALIAS_FLAG).also {
+        it.color = Color.WHITE
+        it.typeface = typeface("sans-serif-light")
+    }
+    private val heroP = TextPaint(Paint.ANTI_ALIAS_FLAG).also {
+        it.color = Color.WHITE
+        it.typeface = typeface("sans-serif-light")
+    }
+    private val heroS = TextPaint(Paint.ANTI_ALIAS_FLAG).also {
+        it.color = 0xD9FFFFFF.toInt()
+        it.typeface = typeface("sans-serif")
+    }
+    private val appNameP = TextPaint(Paint.ANTI_ALIAS_FLAG).also {
+        it.color = Color.WHITE
+        it.typeface = typeface("sans-serif-medium")
+        it.textAlign = Paint.Align.CENTER
+    }
+    private val weatherLarge = TextPaint(Paint.ANTI_ALIAS_FLAG).also {
+        it.color = Color.WHITE
+        it.typeface = typeface("sans-serif-light")
+    }
+    private val weatherSmall = TextPaint(Paint.ANTI_ALIAS_FLAG).also {
+        it.color = 0xDDEAF4FF.toInt()
+        it.typeface = typeface("sans-serif")
+    }
+
+    private val fill = paint()
+    private val scrim = paint()
+    private val glassFill = paint()
+    private val glassEdge = strokePaint()
+    private val halo = paint()
+    private val ring = strokePaint()
+    private val edge = strokePaint()
+    private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+    private val pillFill = paint()
     private val pillStroke = strokePaint()
-    private val glyphP = strokePaint().also { it.strokeCap = Paint.Cap.ROUND; it.strokeJoin = Paint.Join.ROUND }
-    private val glyphFill = fillPaint().also { it.color = Color.WHITE }
+    private val glyphStroke = strokePaint().also {
+        it.strokeCap = Paint.Cap.ROUND
+        it.strokeJoin = Paint.Join.ROUND
+    }
+    private val glyphFill = paint().also { it.color = Color.WHITE }
+    private val divider = paint().also { it.color = 0x77FFFFFF }
 
     private val prefs = ctx.getSharedPreferences("last", Context.MODE_PRIVATE)
-    private val timeFmt = DateFormat.getTimeFormat(ctx)
-    private val dateFmt = SimpleDateFormat("EEEE, d MMMM", Locale.getDefault())
-    private val shortFmt = SimpleDateFormat("d MMM", Locale.getDefault())
+    private val timeFormat = DateFormat.getTimeFormat(ctx)
+    private val dateFormat = SimpleDateFormat("EEEE, d MMMM", Locale.getDefault())
     private var minute = -1L
-    private var timeStr = ""
-    private var dateStr = ""
-    private var timeW = 0f
+    private var timeText = ""
+    private var dateText = ""
+    private var timeWidth = 0f
+
     private val tick = object : Runnable {
-        override fun run() { invalidate(); postDelayed(this, 60000) }
+        override fun run() {
+            invalidate()
+            postDelayed(this, 60000L)
+        }
     }
 
     init {
@@ -120,344 +161,530 @@ class HomeView(ctx: Context) : View(ctx) {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         requestFocus()
-        postDelayed(tick, 20000)
+        postDelayed(tick, 20000L)
     }
 
-    override fun onDetachedFromWindow() {
-        removeCallbacks(tick)
-        super.onDetachedFromWindow()
-    }
 
-    fun setData(d: Data) {
-        val keep = rows.getOrNull(fr)?.title
-        pills = d.pills
+    fun setData(data: Data) {
+        val previousTitle = rows.getOrNull(fr)?.title
+        pills = data.pills
         pillSc = Array(pills.size) { Sp(1f) }
-        rows = d.rows
-        val k = rows.indexOfFirst { r -> r.title == (keep ?: "Apps") }
-        fr = if (k >= 0) k else 0
+        rows = data.rows
+        val newIndex = rows.indexOfFirst { it.title == (previousTitle ?: "Apps") }
+        fr = if (newIndex >= 0) newIndex else 0
         ti = min(ti, max(0, pills.size - 1))
         if (pills.isEmpty()) onBar = false
         heroItem = null
         invalidate()
     }
 
+    fun setWeather(info: WeatherInfo?) {
+        weather = info
+        weatherMessage = if (info == null) "Weather is temporarily unavailable" else ""
+        invalidate()
+    }
+
     fun resetFocus() {
-        fr = 0; ti = 0; onBar = false
-        for (r in rows) r.idx = 0
+        fr = 0
+        ti = 0
+        onBar = false
+        for (row in rows) row.idx = 0
         heroItem = null
         invalidate()
     }
 
-    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
-        ww = w.toFloat(); hh = h.toFloat()
-        th = hh * 0.16f
+    override fun onSizeChanged(w: Int, h: Int, oldW: Int, oldH: Int) {
+        super.onSizeChanged(w, h, oldW, oldH)
+        ww = w.toFloat()
+        hh = h.toFloat()
+
+        // Geometry is relative to the real 16:9 display size.
+        margin = ww * 0.055f
+        padC = hh * 0.018f
+        th = hh * 0.160f
         tw = th * 1.72f
-        gap = hh * 0.022f
+        gap = hh * 0.023f
         pitch = tw + gap
-        padC = hh * 0.02f
-        margin = ww * 0.05f
-        rowPitch = hh * 0.30f
-        dockY = hh * 0.62f
-        rad = th * 0.17f
-        sw = max(1.5f, hh * 0.0018f)
-        pd = hh * 0.062f
-        pg = hh * 0.016f
-        pTime.textSize = hh * 0.07f
-        pDate.textSize = hh * 0.03f
-        pTitle.textSize = hh * 0.024f
-        heroP.textSize = hh * 0.075f
-        heroS.textSize = hh * 0.028f
-        pInL.textSize = hh * 0.026f
-        pInS.textSize = hh * 0.019f
-        val isz = th * 0.56f
-        iconRect.set((tw - isz) / 2f, (th - isz) / 2f, (tw + isz) / 2f, (th + isz) / 2f)
-        val ss = th * 0.3f
-        sysIcon.set(th * 0.12f, th * 0.12f, th * 0.12f + ss, th * 0.12f + ss)
-        shadeP.shader = LinearGradient(0f, 0f, 0f, th, 0x00000000, 0x70000000, Shader.TileMode.CLAMP)
-        glassP.shader = LinearGradient(0f, 0f, 0f, th, 0x38FFFFFF, 0x14FFFFFF, Shader.TileMode.CLAMP)
-        haloP.shader = RadialGradient(tw / 2f, th / 2f, tw * 0.62f, 0x70FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP)
+        dockY = hh * 0.550f
+        rowPitch = hh * 0.220f
+        radius = th * 0.12f
+        strokeW = max(1.5f, hh * 0.0017f)
+        pillSize = hh * 0.045f
+        pillGap = hh * 0.014f
+
+        pTime.textSize = hh * 0.052f
+        pDate.textSize = hh * 0.022f
+        pBrand.textSize = hh * 0.021f
+        pEyebrow.textSize = hh * 0.017f
+        pTitle.textSize = hh * 0.021f
+        pGreeting.textSize = hh * 0.073f
+        heroP.textSize = hh * 0.050f
+        heroS.textSize = hh * 0.023f
+        appNameP.textSize = hh * 0.020f
+        weatherLarge.textSize = hh * 0.075f
+        weatherSmall.textSize = hh * 0.019f
+
+        val iconSize = th * 0.52f
+        iconRect.set(
+            (tw - iconSize) / 2f, (th - iconSize) / 2f,
+            (tw + iconSize) / 2f, (th + iconSize) / 2f
+        )
+        val systemIconSize = th * 0.27f
+        sysIcon.set(th * 0.12f, th * 0.12f, th * 0.12f + systemIconSize, th * 0.12f + systemIconSize)
+
+        val s = hh * 0.008f
+        scrim.shader = LinearGradient(
+            0f, 0f, 0f, hh,
+            intArrayOf(0x15030A18, 0x1A030A18, 0x9D030914.toInt(), 0xD9060D1A.toInt()),
+            floatArrayOf(0f, 0.34f, 0.78f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        glassFill.shader = LinearGradient(
+            0f, 0f, 0f, hh * 0.30f,
+            0x56FFFFFF, 0x1AFFFFFF, Shader.TileMode.CLAMP
+        )
+        halo.shader = RadialGradient(
+            tw / 2f, th / 2f, tw * 0.72f,
+            intArrayOf(0x6A82E8F5, 0x3082E8F5, 0x0082E8F5),
+            floatArrayOf(0f, 0.48f, 1f), Shader.TileMode.CLAMP
+        )
+        glassEdge.strokeWidth = strokeW
+        edge.strokeWidth = strokeW
+        ring.color = 0xFFD8F5FF.toInt()
+        ring.strokeWidth = strokeW * 1.55f
+        divider.strokeWidth = max(1.2f, hh * 0.0014f)
         bgDst.set(0, 0, w, h)
-        makeBg(w, h)
-        for (r in rows) for (i in r.items) { i.lbl = null; i.sbl = null; i.bp = null }
+        makeWallpaper(w, h)
+        for (row in rows) for (item in row.items) {
+            item.lbl = null
+            item.sbl = null
+            item.bp = null
+        }
         minute = -1L
         invalidate()
     }
 
-    private fun makeBg(w: Int, h: Int) {
-        // Render once at one-third resolution and scale it; RGB_565 halves wallpaper memory.
-        val bw = max(1, w / 3)
-        val bh = max(1, h / 3)
-        bg?.recycle()
-        val b = Bitmap.createBitmap(bw, bh, Bitmap.Config.RGB_565)
-        val c = Canvas(b)
-        val p = Paint(Paint.DITHER_FLAG)
-        p.shader = LinearGradient(0f, 0f, bw.toFloat(), bh.toFloat(),
-            0xFF080D1B.toInt(), 0xFF17152F.toInt(), Shader.TileMode.CLAMP)
-        c.drawRect(0f, 0f, bw.toFloat(), bh.toFloat(), p)
-        p.shader = RadialGradient(bw * 0.78f, bh * 0.20f, bw * 0.72f,
-            intArrayOf(0x553C82B8, 0x223C82B8, 0x003C82B8), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
-        c.drawRect(0f, 0f, bw.toFloat(), bh.toFloat(), p)
-        p.shader = RadialGradient(bw * 0.12f, bh * 0.82f, bw * 0.70f,
-            intArrayOf(0x554F3D91, 0x224F3D91, 0x004F3D91), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
-        c.drawRect(0f, 0f, bw.toFloat(), bh.toFloat(), p)
-        p.shader = null
-        bg = b
+    private fun makeWallpaper(w: Int, h: Int) {
+        val targetW = max(1, w / 3)
+        val targetH = max(1, h / 3)
+        var decoded: Bitmap? = null
+        try {
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = 2
+                inPreferredConfig = Bitmap.Config.RGB_565
+                inDither = true
+            }
+            context.assets.open("glasshome_wallpaper.jpg").use { input ->
+                decoded = BitmapFactory.decodeStream(input, null, options)
+            }
+        } catch (_: Exception) {
+            decoded = null
+        }
+        val source = decoded
+        if (source != null) {
+            bg?.recycle()
+            bg = Bitmap.createScaledBitmap(source, targetW, targetH, true).also {
+                if (it !== source) source.recycle()
+            }
+        } else {
+            // Safe fallback if the wallpaper asset is missing.
+            val fallback = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.RGB_565)
+            val canvas = Canvas(fallback)
+            val p = Paint(Paint.ANTI_ALIAS_FLAG)
+            p.shader = LinearGradient(
+                0f, 0f, targetW.toFloat(), targetH.toFloat(),
+                0xFF071426.toInt(), 0xFF1B2040.toInt(), Shader.TileMode.CLAMP
+            )
+            canvas.drawRect(0f, 0f, targetW.toFloat(), targetH.toFloat(), p)
+            p.shader = RadialGradient(
+                targetW * 0.68f, targetH * 0.28f, targetW * 0.65f,
+                0x8053DCEB.toInt(), 0x003B4D84, Shader.TileMode.CLAMP
+            )
+            canvas.drawRect(0f, 0f, targetW.toFloat(), targetH.toFloat(), p)
+            p.shader = null
+            bg?.recycle()
+            bg = fallback
+        }
     }
 
-    private fun rowAlpha(d: Float): Float = when {
-        d <= -1f -> 0f
-        d < 0f -> 1f + d
-        d < 1f -> 1f - 0.4f * d
-        else -> max(0f, 0.6f - 0.6f * (d - 1f))
+    private fun rowAlpha(distance: Float): Float = when {
+        distance <= -1f -> 0f
+        distance < 0f -> 1f + distance
+        distance < 1f -> 1f - 0.38f * distance
+        else -> max(0f, 0.62f - 0.62f * (distance - 1f))
     }
 
-    private fun focusItem(): Item? {
+    private fun focusedItem(): Item? {
         if (onBar) return pills.getOrNull(ti)
         val row = rows.getOrNull(fr) ?: return null
         return row.items.getOrNull(row.idx)
     }
 
-    private fun rel(ms: Long): String {
+    private fun relativeOpenedTime(time: Long): String {
         val now = System.currentTimeMillis()
-        val off = TimeZone.getDefault().getOffset(now).toLong()
+        val offset = TimeZone.getDefault().getOffset(now).toLong()
         val day = 86400000L
-        val diff = (now + off) / day - (ms + off) / day
-        val t = timeFmt.format(Date(ms))
-        return when (diff) {
-            0L -> "today, $t"
-            1L -> "yesterday, $t"
-            else -> shortFmt.format(Date(ms))
+        val difference = (now + offset) / day - (time + offset) / day
+        val formattedTime = timeFormat.format(Date(time))
+        return when (difference) {
+            0L -> "Opened today at $formattedTime"
+            1L -> "Opened yesterday at $formattedTime"
+            else -> "Last opened " + SimpleDateFormat("d MMM", Locale.getDefault()).format(Date(time))
         }
     }
 
-    private fun subFor(item: Item?): String {
-        if (item == null) return ""
-        val s = item.sub
-        if (s != null) return s
-        val p = item.pkg ?: return "Press OK to open"
-        val t = prefs.getLong(p, 0L)
-        return if (t == 0L) "Press OK to open" else "Last opened " + rel(t)
+    private fun subtitleFor(item: Item?): String {
+        if (item == null) return "Your space for movies, shows and everything you enjoy."
+        val custom = item.sub
+        if (custom != null) return custom
+        val packageName = item.pkg ?: return "Press OK to open"
+        val openedAt = prefs.getLong(packageName, 0L)
+        return if (openedAt == 0L) "Press OK to open" else relativeOpenedTime(openedAt)
     }
 
-    private fun setHero(item: Item?) {
+    private fun updateHero(item: Item?) {
         prevLabel = heroLabel
         prevSub = heroSub
         heroItem = item
-        heroLabel = if (item == null) "" else TextUtils.ellipsize(item.label, heroP, ww * 0.7f, TextUtils.TruncateAt.END)
-        heroSub = subFor(item)
+        heroLabel = if (item == null) "Explore your apps" else
+            TextUtils.ellipsize(item.label, heroP, ww * 0.58f, TextUtils.TruncateAt.END)
+        heroSub = subtitleFor(item)
         heroA.x = 0f
         heroA.v = 0f
     }
 
-    private fun pillCx(i: Int): Float = ww - margin - pd / 2f - (pills.size - 1 - i) * (pd + pg)
-    private fun pillCy(): Float = hh * 0.078f
-
-    override fun onDraw(c: Canvas) {
-        if (ww == 0f) return
-        val now = System.nanoTime()
-        val dt = if (last == 0L) 0.016f else min((now - last) / 1e9f, 0.05f)
-        last = now
-        var busy = false
-
-        val fi = focusItem()
-        if (fi !== heroItem) setHero(fi)
-
-        // Static cached wallpaper: no per-frame blur, glow, or color animation.
-        bg?.let { c.drawBitmap(it, null, bgDst, bgPaint) }
-
-        // Clock and date.
-        val ms = System.currentTimeMillis()
-        if (ms / 60000L != minute) {
-            minute = ms / 60000L
-            val d = Date(ms)
-            timeStr = timeFmt.format(d)
-            dateStr = dateFmt.format(d)
-            timeW = pTime.measureText(timeStr)
+    private fun greeting(): String {
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        return when {
+            hour < 12 -> "Good morning."
+            hour < 18 -> "Good afternoon."
+            else -> "Good evening."
         }
-        val base = hh * 0.103f
-        pTime.alpha = 255
-        c.drawText(timeStr, margin, base, pTime)
-        val dx = margin + timeW + hh * 0.022f
-        divP.alpha = 90
-        c.drawLine(dx, base - hh * 0.042f, dx, base + hh * 0.004f, divP)
-        pDate.alpha = 190
-        c.drawText(dateStr, dx + hh * 0.022f, base, pDate)
+    }
 
-        // Top-right buttons.
+    private fun pillCenterX(index: Int): Float =
+        ww - margin - pillSize / 2f - (pills.size - 1 - index) * (pillSize + pillGap)
+
+    private fun pillCenterY(): Float = hh * 0.080f
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        if (ww == 0f || hh == 0f) return
+
+        val nowNs = System.nanoTime()
+        val dt = if (lastFrame == 0L) 0.016f else min((nowNs - lastFrame) / 1e9f, 0.05f)
+        lastFrame = nowNs
+        var animating = false
+
+        val selected = focusedItem()
+        if (selected !== heroItem) updateHero(selected)
+
+        // Tiny focus-linked parallax. The cached bitmap is only transformed, never re-rendered.
+        val focusIndex = if (onBar) ti else rows.getOrNull(fr)?.idx ?: 0
+        val pan = ((focusIndex % 5) - 2) * ww * 0.0018f
+        val overscanX = ww * 0.012f
+        val overscanY = hh * 0.012f
+        bgDst.set(
+            (-overscanX + pan).toInt(), (-overscanY).toInt(),
+            (ww + overscanX + pan).toInt(), (hh + overscanY).toInt()
+        )
+        bg?.let { canvas.drawBitmap(it, null, bgDst, bgPaint) }
+        canvas.drawRect(0f, 0f, ww, hh, scrim)
+
+        // Brand.
+        pBrand.alpha = 245
+        canvas.drawText("GLASSHOME", margin, hh * 0.085f, pBrand)
+        pEyebrow.alpha = 210
+        canvas.drawText("YOUR HOME, BEAUTIFULLY", margin, hh * 0.112f, pEyebrow)
+
+        // Time and date use a single cached minute tick.
+        val currentMs = System.currentTimeMillis()
+        if (currentMs / 60000L != minute) {
+            minute = currentMs / 60000L
+            val date = Date(currentMs)
+            timeText = timeFormat.format(date)
+            dateText = dateFormat.format(date)
+            timeWidth = pTime.measureText(timeText)
+        }
+        val quickLeft = if (pills.isNotEmpty()) pillCenterX(0) - pillSize / 2f - hh * 0.035f else ww - margin
+        val dateWidth = pDate.measureText(dateText)
+        val timeX = quickLeft - hh * 0.028f - dateWidth - hh * 0.025f - timeWidth
+        pTime.alpha = 255
+        canvas.drawText(timeText, timeX, hh * 0.091f, pTime)
+        pDate.alpha = 200
+        canvas.drawText(dateText, timeX + timeWidth + hh * 0.025f, hh * 0.087f, pDate)
+
+        // Quick settings shortcuts.
         for (i in pills.indices) {
             val focused = onBar && i == ti
-            if (pillSc[i].go(if (focused) 1.18f else 1f, 420f, 26f, dt)) busy = true
-            drawPill(c, pills[i], pillCx(i), pillCy(), pillSc[i].x)
+            if (pillSc[i].go(if (focused) 1.14f else 1f, 390f, 28f, dt)) animating = true
+            drawPill(canvas, pills[i], pillCenterX(i), pillCenterY(), pillSc[i].x)
         }
 
-        // Hero title: crossfades when focus changes.
-        if (heroA.go(1f, 260f, 32f, dt)) busy = true
-        val ha = 1f - frAnim.x.coerceIn(0f, 1f)
-        if (ha > 0.01f) {
-            val t = heroA.x.coerceIn(0f, 1f)
-            val hx = margin + padC
-            val hy = hh * 0.45f
-            if (t < 0.99f) {
-                heroP.alpha = (255f * (1f - t) * ha).toInt()
-                c.drawText(prevLabel, 0, prevLabel.length, hx, hy - hh * 0.012f * t, heroP)
-                heroS.alpha = (150f * (1f - t) * ha).toInt()
-                c.drawText(prevSub, 0, prevSub.length, hx, hy + hh * 0.056f - hh * 0.012f * t, heroS)
+        // Calm hero area; focused app information crossfades smoothly.
+        pEyebrow.alpha = 220
+        canvas.drawText(greeting().uppercase(Locale.getDefault()), margin, hh * 0.245f, pEyebrow)
+        pGreeting.alpha = 255
+        canvas.drawText("Settle in.", margin, hh * 0.335f, pGreeting)
+
+        if (heroA.go(1f, 260f, 32f, dt)) animating = true
+        val heroAlpha = (1f - frAnim.x).coerceIn(0f, 1f)
+        if (heroAlpha > 0.01f) {
+            val blend = heroA.x.coerceIn(0f, 1f)
+            val x = margin
+            val y = hh * 0.425f
+            if (blend < 0.99f) {
+                heroP.alpha = (245f * (1f - blend) * heroAlpha).toInt()
+                canvas.drawText(prevLabel, 0, prevLabel.length, x, y, heroP)
+                heroS.alpha = (190f * (1f - blend) * heroAlpha).toInt()
+                canvas.drawText(prevSub, 0, prevSub.length, x, y + hh * 0.040f, heroS)
             }
-            heroP.alpha = (255f * t * ha).toInt()
-            c.drawText(heroLabel, 0, heroLabel.length, hx, hy + hh * 0.014f * (1f - t), heroP)
-            heroS.alpha = (150f * t * ha).toInt()
-            c.drawText(heroSub, 0, heroSub.length, hx, hy + hh * 0.056f + hh * 0.014f * (1f - t), heroS)
+            heroP.alpha = (245f * blend * heroAlpha).toInt()
+            canvas.drawText(heroLabel, 0, heroLabel.length, x, y + hh * 0.012f * (1f - blend), heroP)
+            heroS.alpha = (190f * blend * heroAlpha).toInt()
+            canvas.drawText(heroSub, 0, heroSub.length, x, y + hh * 0.050f, heroS)
         }
 
-        // Rows.
-        if (frAnim.go(fr.toFloat(), 220f, 29.7f, dt)) busy = true
-        val vw = ww - 2f * margin - 2f * padC
+        drawWeather(canvas)
+
+        // Rows move like a soft carousel. There are no per-frame allocations.
+        if (frAnim.go(fr.toFloat(), 220f, 30f, dt)) animating = true
+        val viewportWidth = ww - 2f * margin - 2f * padC
         for (r in rows.indices) {
             val row = rows[r]
-            val d = r - frAnim.x
-            val a = rowAlpha(d)
-            val maxScroll = max(0f, row.items.size * pitch - gap - vw)
-            val target = min(max(0, row.idx - 1) * pitch, maxScroll)
-            if (row.scroll.go(target, 220f, 29.7f, dt, 0.3f)) busy = true
+            val distance = r - frAnim.x
+            val alpha = rowAlpha(distance)
+            val maxScroll = max(0f, row.items.size * pitch - gap - viewportWidth)
+            val targetScroll = min(max(0, row.idx - 1) * pitch, maxScroll)
+            if (row.scroll.go(targetScroll, 220f, 30f, dt, 0.3f)) animating = true
+
             for (i in row.items.indices) {
-                val on = !onBar && r == fr && i == row.idx
-                if (row.sc[i].go(if (on) 1.09f else 1f, 420f, 26f, dt)) busy = true
+                val focused = !onBar && r == fr && i == row.idx
+                if (row.sc[i].go(if (focused) 1.075f else 1f, 390f, 28f, dt)) animating = true
             }
-            if (a <= 0.01f) continue
-            val y = dockY + d * rowPitch
+            if (alpha <= 0.01f) continue
 
-            dockFill.alpha = (36f * a).toInt()
-            dockStroke.strokeWidth = sw
-            dockStroke.alpha = (64f * a).toInt()
-            tmp.set(margin, y - padC, ww - margin, y + th + padC)
-            c.drawRoundRect(tmp, th * 0.26f, th * 0.26f, dockFill)
-            c.drawRoundRect(tmp, th * 0.26f, th * 0.26f, dockStroke)
-            if (r == 1) {
-                pTitle.alpha = (170f * a).toInt()
-                c.drawText(row.title, margin + padC, y - padC - hh * 0.014f, pTitle)
-            }
+            val y = dockY + distance * rowPitch
+            pTitle.alpha = (205f * alpha).toInt()
+            canvas.drawText(row.title.uppercase(Locale.getDefault()), margin + padC, y - padC - hh * 0.012f, pTitle)
 
-            c.save()
-            c.clipRect(margin + padC * 0.4f, 0f, ww - margin - padC * 0.4f, hh)
+            canvas.save()
+            canvas.clipRect(margin + padC * 0.35f, 0f, ww - margin - padC * 0.35f, hh)
             for (i in row.items.indices) {
                 val x = margin + padC - row.scroll.x + i * pitch
                 if (x > ww || x + tw < 0f) continue
-                drawTile(c, row.items[i], x, y, row.sc[i].x, a)
+                drawTile(canvas, row.items[i], x, y, row.sc[i].x, alpha, !onBar && r == fr && i == row.idx)
             }
-            c.restore()
+            canvas.restore()
         }
 
-        if (busy) postInvalidateOnAnimation() else last = 0L
+        // Subtle remote navigation hint.
+        appNameP.textAlign = Paint.Align.LEFT
+        appNameP.color = 0xBFEAF4FF.toInt()
+        appNameP.textSize = hh * 0.015f
+        appNameP.alpha = 170
+        canvas.drawText("←  →  BROWSE     OK  OPEN     ↑  QUICK SETTINGS", margin, hh * 0.985f, appNameP)
+
+        if (animating) postInvalidateOnAnimation() else lastFrame = 0L
     }
 
-    private fun makeBp(item: Item, b: Bitmap): Paint {
-        val sh = BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
-        val sc = max(tw / b.width, th / b.height)
-        val m = Matrix()
-        m.setScale(sc, sc)
-        m.postTranslate((tw - b.width * sc) / 2f, (th - b.height * sc) / 2f)
-        sh.setLocalMatrix(m)
-        val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        p.shader = sh
-        item.bp = p
-        return p
-    }
+    private fun drawWeather(canvas: Canvas) {
+        val left = ww * 0.705f
+        val top = hh * 0.185f
+        val right = ww - margin
+        val bottom = hh * 0.415f
+        scratch.set(left, top, right, bottom)
+        glassFill.alpha = 220
+        canvas.drawRoundRect(scratch, hh * 0.026f, hh * 0.026f, glassFill)
+        glassEdge.alpha = 100
+        glassEdge.strokeWidth = strokeW
+        canvas.drawRoundRect(scratch, hh * 0.026f, hh * 0.026f, glassEdge)
 
-    private fun drawTile(c: Canvas, item: Item, x: Float, y: Float, s: Float, a: Float) {
-        val p = ((s - 1f) / 0.09f).coerceIn(0f, 1f)
-        c.save()
-        c.translate(x + tw / 2f, y + th / 2f)
-        c.scale(s, s)
-        c.translate(-tw / 2f, -th / 2f)
-        if (p > 0.02f) {
-            haloP.alpha = (150f * p * a).toInt()
-            c.drawRect(-tw * 0.25f, -th * 0.5f, tw * 1.25f, th * 1.5f, haloP)
+        appNameP.textAlign = Paint.Align.LEFT
+        appNameP.textSize = hh * 0.015f
+        appNameP.color = 0xFF92DCEB.toInt()
+        appNameP.alpha = 230
+        canvas.drawText("LOCAL WEATHER", left + hh * 0.026f, top + hh * 0.050f, appNameP)
+
+        val info = weather
+        if (info == null) {
+            weatherLarge.textSize = hh * 0.034f
+            weatherLarge.alpha = 235
+            canvas.drawText("Weather", left + hh * 0.026f, top + hh * 0.112f, weatherLarge)
+            weatherSmall.textSize = hh * 0.017f
+            weatherSmall.alpha = 185
+            canvas.drawText(weatherMessage, left + hh * 0.026f, top + hh * 0.158f, weatherSmall)
+            return
         }
-        val ia = (255f * a).toInt()
-        val bn = item.banner
-        if (bn != null) {
-            val bp = item.bp ?: makeBp(item, bn)
-            bp.alpha = ia
-            c.drawRoundRect(0f, 0f, tw, th, rad, rad, bp)
-        } else if (item.tile != 0) {
-            fill.color = item.tile
-            fill.alpha = ia
-            c.drawRoundRect(0f, 0f, tw, th, rad, rad, fill)
-            shadeP.alpha = ia
-            c.drawRoundRect(0f, 0f, tw, th, rad, rad, shadeP)
-            val ic = item.icon
-            if (ic != null) { bmpP.alpha = ia; c.drawBitmap(ic, null, iconRect, bmpP) }
+
+        weatherLarge.textSize = hh * 0.075f
+        weatherLarge.alpha = 255
+        canvas.drawText("${info.temperature}°", left + hh * 0.026f, top + hh * 0.150f, weatherLarge)
+        weatherSmall.textSize = hh * 0.019f
+        weatherSmall.alpha = 235
+        val city = info.city.uppercase(Locale.getDefault())
+        canvas.drawText(city, left + hh * 0.155f, top + hh * 0.093f, weatherSmall)
+        canvas.drawText(info.description, left + hh * 0.155f, top + hh * 0.129f, weatherSmall)
+        weatherSmall.textSize = hh * 0.016f
+        weatherSmall.alpha = 185
+        val details = "Feels ${info.feelsLike}°  ·  Humidity ${info.humidity}%  ·  Wind ${info.windKmh} km/h"
+        val fitted = TextUtils.ellipsize(details, weatherSmall, right - left - hh * 0.052f, TextUtils.TruncateAt.END)
+        canvas.drawText(fitted, 0, fitted.length, left + hh * 0.026f, bottom - hh * 0.028f, weatherSmall)
+    }
+
+    private fun makeBitmapPaint(item: Item, bitmap: Bitmap): Paint {
+        val shader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        val scale = max(tw / bitmap.width, th / bitmap.height)
+        val matrix = Matrix()
+        matrix.setScale(scale, scale)
+        matrix.postTranslate((tw - bitmap.width * scale) / 2f, (th - bitmap.height * scale) / 2f)
+        shader.setLocalMatrix(matrix)
+        val result = Paint(Paint.ANTI_ALIAS_FLAG).also { it.shader = shader }
+        item.bp = result
+        return result
+    }
+
+    private fun drawTile(
+        canvas: Canvas,
+        item: Item,
+        x: Float,
+        y: Float,
+        scale: Float,
+        alpha: Float,
+        focused: Boolean
+    ) {
+        val progress = ((scale - 1f) / 0.075f).coerceIn(0f, 1f)
+        canvas.save()
+        canvas.translate(x + tw / 2f, y + th / 2f)
+        canvas.scale(scale, scale)
+        canvas.translate(-tw / 2f, -th / 2f)
+
+        // A restrained shadow and cyan halo replace expensive real-time blur.
+        fill.color = 0x66000000
+        fill.alpha = (75f * alpha).toInt()
+        scratch.set(0f, hh * 0.006f, tw, th + hh * 0.006f)
+        canvas.drawRoundRect(scratch, radius, radius, fill)
+        if (progress > 0.02f) {
+            halo.alpha = (125f * progress * alpha).toInt()
+            canvas.drawRoundRect(-tw * 0.13f, -th * 0.18f, tw * 1.13f, th * 1.18f, radius * 1.4f, radius * 1.4f, halo)
+        }
+
+        val imageAlpha = (255f * alpha).toInt()
+        val banner = item.banner
+        if (banner != null) {
+            val bannerPaint = item.bp ?: makeBitmapPaint(item, banner)
+            bannerPaint.alpha = imageAlpha
+            canvas.drawRoundRect(0f, 0f, tw, th, radius, radius, bannerPaint)
+            // Bottom fade keeps the label readable on artwork.
+            val saved = fill.shader
+            fill.shader = LinearGradient(
+                0f, th * 0.48f, 0f, th,
+                0x00000000, 0x66000000, Shader.TileMode.CLAMP
+            )
+            fill.alpha = imageAlpha
+            canvas.drawRoundRect(0f, 0f, tw, th, radius, radius, fill)
+            fill.shader = saved
         } else {
-            glassP.alpha = ia
-            c.drawRoundRect(0f, 0f, tw, th, rad, rad, glassP)
-            val ic = item.icon
-            if (ic != null) { bmpP.alpha = ia; c.drawBitmap(ic, null, sysIcon, bmpP) }
-            val lb = item.lbl ?: TextUtils.ellipsize(item.label, pInL, tw * 0.86f, TextUtils.TruncateAt.END).also { item.lbl = it }
-            pInL.alpha = ia
-            c.drawText(lb, 0, lb.length, th * 0.12f, th * 0.72f, pInL)
-            val sub = item.sub
-            if (sub != null) {
-                val sb = item.sbl ?: TextUtils.ellipsize(sub, pInS, tw * 0.86f, TextUtils.TruncateAt.END).also { item.sbl = it }
-                pInS.alpha = (150f * a).toInt()
-                c.drawText(sb, 0, sb.length, th * 0.12f, th * 0.87f, pInS)
+            fill.color = if (item.tile != 0) item.tile else 0x553C6580
+            fill.alpha = imageAlpha
+            canvas.drawRoundRect(0f, 0f, tw, th, radius, radius, fill)
+            glassFill.alpha = (100f * alpha).toInt()
+            canvas.drawRoundRect(0f, 0f, tw, th, radius, radius, glassFill)
+            item.icon?.let {
+                bitmapPaint.alpha = imageAlpha
+                canvas.drawBitmap(it, null, iconRect, bitmapPaint)
             }
         }
-        edgeP.strokeWidth = sw
-        edgeP.alpha = (50f * (1f - p) * a).toInt()
-        c.drawRoundRect(0f, 0f, tw, th, rad, rad, edgeP)
-        if (p > 0.02f) {
-            ringP.strokeWidth = sw * 2.2f
-            ringP.alpha = (255f * p * a).toInt()
-            val o = ringP.strokeWidth * 0.9f
-            c.drawRoundRect(-o, -o, tw + o, th + o, rad + o, rad + o, ringP)
+
+        edge.color = 0x9CFFFFFF.toInt()
+        edge.alpha = (60f * (1f - progress) * alpha).toInt()
+        edge.strokeWidth = strokeW
+        canvas.drawRoundRect(0f, 0f, tw, th, radius, radius, edge)
+        if (focused || progress > 0.02f) {
+            ring.alpha = (220f * max(progress, if (focused) 0.68f else 0f) * alpha).toInt()
+            val out = ring.strokeWidth * 0.75f
+            canvas.drawRoundRect(-out, -out, tw + out, th + out, radius + out, radius + out, ring)
         }
-        c.restore()
+
+        // App name sits below the art, like a premium TV carousel.
+        val label = item.lbl ?: TextUtils.ellipsize(
+            item.label, appNameP, tw * 0.96f, TextUtils.TruncateAt.END
+        ).also { item.lbl = it }
+        appNameP.textAlign = Paint.Align.CENTER
+        appNameP.textSize = hh * 0.020f
+        appNameP.color = Color.WHITE
+        appNameP.alpha = (if (focused) 255f else 210f * alpha).toInt()
+        canvas.drawText(label, 0, label.length, tw / 2f, th + hh * 0.030f, appNameP)
+
+        canvas.restore()
     }
 
-    private fun drawPill(c: Canvas, item: Item, cx: Float, cy: Float, s: Float) {
-        val p = ((s - 1f) / 0.18f).coerceIn(0f, 1f)
-        c.save()
-        c.translate(cx, cy)
-        c.scale(s, s)
-        pillFill.alpha = (40f + 60f * p).toInt()
-        c.drawCircle(0f, 0f, pd / 2f, pillFill)
-        pillStroke.strokeWidth = sw * (1f + p)
-        pillStroke.alpha = (70f + 185f * p).toInt()
-        c.drawCircle(0f, 0f, pd / 2f, pillStroke)
-        glyph(c, item.glyph, pd)
-        c.restore()
+    private fun drawPill(canvas: Canvas, item: Item, centerX: Float, centerY: Float, scale: Float) {
+        val progress = ((scale - 1f) / 0.14f).coerceIn(0f, 1f)
+        canvas.save()
+        canvas.translate(centerX, centerY)
+        canvas.scale(scale, scale)
+        pillFill.color = 0x36FFFFFF
+        pillFill.alpha = (55f + 65f * progress).toInt()
+        canvas.drawCircle(0f, 0f, pillSize / 2f, pillFill)
+        pillStroke.color = 0xFFE8F8FF.toInt()
+        pillStroke.strokeWidth = strokeW
+        pillStroke.alpha = (65f + 170f * progress).toInt()
+        canvas.drawCircle(0f, 0f, pillSize / 2f, pillStroke)
+        drawGlyph(canvas, item.glyph, pillSize)
+        canvas.restore()
     }
 
-    private fun glyph(c: Canvas, g: Int, d: Float) {
-        glyphP.strokeWidth = d * 0.07f
-        when (g) {
+    private fun drawGlyph(canvas: Canvas, glyph: Int, size: Float) {
+        glyphStroke.strokeWidth = size * 0.065f
+        glyphStroke.color = Color.WHITE
+        when (glyph) {
             Glyph.WIFI -> {
-                val oy = d * 0.16f
-                for (k in 1..3) {
-                    val r = d * 0.1f * k
-                    tmp.set(-r, oy - r, r, oy + r)
-                    c.drawArc(tmp, 225f, 90f, false, glyphP)
+                val offsetY = size * 0.15f
+                for (i in 1..3) {
+                    val r = size * 0.105f * i
+                    scratch.set(-r, offsetY - r, r, offsetY + r)
+                    canvas.drawArc(scratch, 225f, 90f, false, glyphStroke)
                 }
-                c.drawCircle(0f, oy, d * 0.04f, glyphFill)
+                canvas.drawCircle(0f, offsetY, size * 0.045f, glyphFill)
             }
             Glyph.GEAR -> {
-                c.drawCircle(0f, 0f, d * 0.17f, glyphP)
-                for (k in 0 until 8) {
-                    val an = k * 0.7853982f
-                    val ca = cos(an)
-                    val sa = sin(an)
-                    c.drawLine(ca * d * 0.17f, sa * d * 0.17f, ca * d * 0.27f, sa * d * 0.27f, glyphP)
+                canvas.drawCircle(0f, 0f, size * 0.17f, glyphStroke)
+                for (i in 0 until 8) {
+                    val angle = i * 0.7853982f
+                    val cx = cos(angle)
+                    val sy = sin(angle)
+                    canvas.drawLine(cx * size * 0.18f, sy * size * 0.18f, cx * size * 0.29f, sy * size * 0.29f, glyphStroke)
                 }
             }
             Glyph.BT -> {
-                gp.reset()
-                gp.moveTo(-0.17f * d, -0.17f * d)
-                gp.lineTo(0.17f * d, 0.17f * d)
-                gp.lineTo(0f, 0.3f * d)
-                gp.lineTo(0f, -0.3f * d)
-                gp.lineTo(0.17f * d, -0.17f * d)
-                gp.lineTo(-0.17f * d, 0.17f * d)
-                c.drawPath(gp, glyphP)
+                glyphPath.reset()
+                glyphPath.moveTo(-0.17f * size, -0.17f * size)
+                glyphPath.lineTo(0.17f * size, 0.17f * size)
+                glyphPath.lineTo(0f, 0.30f * size)
+                glyphPath.lineTo(0f, -0.30f * size)
+                glyphPath.lineTo(0.17f * size, -0.17f * size)
+                glyphPath.lineTo(-0.17f * size, 0.17f * size)
+                canvas.drawPath(glyphPath, glyphStroke)
+            }
+            Glyph.DISPLAY -> {
+                scratch.set(-size * 0.28f, -size * 0.22f, size * 0.28f, size * 0.18f)
+                canvas.drawRoundRect(scratch, size * 0.045f, size * 0.045f, glyphStroke)
+                canvas.drawLine(0f, size * 0.18f, 0f, size * 0.29f, glyphStroke)
+                canvas.drawLine(-size * 0.16f, size * 0.29f, size * 0.16f, size * 0.29f, glyphStroke)
+            }
+            Glyph.SOUND -> {
+                glyphPath.reset()
+                glyphPath.moveTo(-size * 0.27f, -size * 0.10f)
+                glyphPath.lineTo(-size * 0.12f, -size * 0.10f)
+                glyphPath.lineTo(size * 0.06f, -size * 0.25f)
+                glyphPath.lineTo(size * 0.06f, size * 0.25f)
+                glyphPath.lineTo(-size * 0.12f, size * 0.10f)
+                glyphPath.lineTo(-size * 0.27f, size * 0.10f)
+                glyphPath.close()
+                canvas.drawPath(glyphPath, glyphStroke)
+                scratch.set(-size * 0.14f, -size * 0.34f, size * 0.50f, size * 0.34f)
+                canvas.drawArc(scratch, -50f, 100f, false, glyphStroke)
             }
         }
     }
@@ -466,22 +693,28 @@ class HomeView(ctx: Context) : View(ctx) {
         item.pkg?.let { prefs.edit().putLong(it, System.currentTimeMillis()).apply() }
         try {
             context.startActivity(Intent(item.intent))
-        } catch (e: Exception) {
-            Toast.makeText(context, "Can't open " + item.label, Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            Toast.makeText(context, "Can't open ${item.label}", Toast.LENGTH_SHORT).show()
         }
     }
 
-    override fun onKeyDown(k: Int, e: KeyEvent): Boolean {
-        if (rows.isEmpty() && pills.isEmpty()) return super.onKeyDown(k, e)
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (rows.isEmpty() && pills.isEmpty()) return super.onKeyDown(keyCode, event)
         val row = rows.getOrNull(fr)
-        when (k) {
+        when (keyCode) {
             KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                if (onBar) { if (ti < pills.size - 1) ti++ }
-                else if (row != null && row.idx < row.items.size - 1) row.idx++
+                if (onBar) {
+                    if (ti < pills.size - 1) ti++
+                } else if (row != null && row.idx < row.items.size - 1) {
+                    row.idx++
+                }
             }
             KeyEvent.KEYCODE_DPAD_LEFT -> {
-                if (onBar) { if (ti > 0) ti-- }
-                else if (row != null && row.idx > 0) row.idx--
+                if (onBar) {
+                    if (ti > 0) ti--
+                } else if (row != null && row.idx > 0) {
+                    row.idx--
+                }
             }
             KeyEvent.KEYCODE_DPAD_DOWN -> {
                 if (onBar) onBar = false
@@ -493,24 +726,27 @@ class HomeView(ctx: Context) : View(ctx) {
                     else if (pills.isNotEmpty()) onBar = true
                 }
             }
-            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
-            KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
-                if (e.repeatCount == 0) focusItem()?.let { open(it) }
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER,
+            KeyEvent.KEYCODE_BUTTON_A -> {
+                if (event.repeatCount == 0) focusedItem()?.let { open(it) }
             }
-            else -> return super.onKeyDown(k, e)
+            else -> return super.onKeyDown(keyCode, event)
         }
         invalidate()
         return true
     }
 
-    // Air-mouse remotes act as a pointer: tap a button or tile to open it.
-    override fun onTouchEvent(e: MotionEvent): Boolean {
-        if (e.action != MotionEvent.ACTION_UP) return true
+    /** Air-mouse remotes can tap a quick setting or an app card. */
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.action != MotionEvent.ACTION_UP) return true
         for (i in pills.indices) {
-            val dx = e.x - pillCx(i)
-            val dy = e.y - pillCy()
-            if (dx * dx + dy * dy <= pd * pd * 0.36f) {
-                onBar = true; ti = i
+            val dx = event.x - pillCenterX(i)
+            val dy = event.y - pillCenterY()
+            if (dx * dx + dy * dy <= pillSize * pillSize * 0.36f) {
+                onBar = true
+                ti = i
                 invalidate()
                 open(pills[i])
                 return true
@@ -518,14 +754,16 @@ class HomeView(ctx: Context) : View(ctx) {
         }
         for (r in rows.indices) {
             val row = rows[r]
-            val d = r - frAnim.x
-            if (rowAlpha(d) < 0.3f) continue
-            val y = dockY + d * rowPitch
-            if (e.y < y || e.y > y + th) continue
+            val distance = r - frAnim.x
+            if (rowAlpha(distance) < 0.3f) continue
+            val y = dockY + distance * rowPitch
+            if (event.y < y || event.y > y + th + hh * 0.045f) continue
             for (i in row.items.indices) {
                 val x = margin + padC - row.scroll.x + i * pitch
-                if (e.x >= x && e.x <= x + tw) {
-                    onBar = false; fr = r; row.idx = i
+                if (event.x >= x && event.x <= x + tw) {
+                    onBar = false
+                    fr = r
+                    row.idx = i
                     invalidate()
                     open(row.items[i])
                     return true
@@ -533,5 +771,16 @@ class HomeView(ctx: Context) : View(ctx) {
             }
         }
         return true
+    }
+
+    fun release() {
+        removeCallbacks(tick)
+        bg?.recycle()
+        bg = null
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(tick)
+        super.onDetachedFromWindow()
     }
 }

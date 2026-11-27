@@ -1,13 +1,26 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+
 android {
     namespace = "com.clean.glasshome"
     compileSdk = 34
-    defaultConfig { applicationId = "com.clean.glasshome"; minSdk = 24; targetSdk = 28; versionCode = 4; versionName = "4.0-lite" }
+
+    defaultConfig {
+        applicationId = "com.clean.glasshome"
+        minSdk = 24
+        targetSdk = 28
+        versionCode = 5
+        versionName = "5.0"
+    }
+
     signingConfigs {
         create("fixed") {
-            storeFile = file("debug.keystore"); storePassword = "android"; keyAlias = "key"; keyPassword = "android"
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "key"
+            keyPassword = "android"
         }
     }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -15,7 +28,11 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
         }
     }
-    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
     kotlinOptions { jvmTarget = "17" }
     lint { checkReleaseBuilds = false; abortOnError = false }
 }
